@@ -96,6 +96,9 @@
   td.t.fever { color: var(--fever); font-weight: 600; }
   .empty { color: var(--muted); font-size: 0.9rem; margin: 0; }
   .warnbox { border: 1px solid var(--warn); color: var(--fg); background: var(--surface); border-radius: 8px; padding: 12px 14px; font-size: 0.92rem; margin-bottom: 16px; }
+  .sheet { border-top: 1px solid var(--line); }
+  .sheet summary { padding: 12px; cursor: pointer; font-size: 0.9rem; font-weight: 500; }
+  .sheet .add { border-top: 0; padding-top: 0; }
   .device { font-size: 0.85rem; color: var(--muted); font-family: var(--mono); }
   @media (prefers-reduced-motion: no-preference) { .reading .val { transition: color .3s; } }
 </style>
@@ -126,6 +129,16 @@
         </div>
         <button type="submit">Añadir</button>
       </form>
+      <details class="sheet" id="sheetBox">
+        <summary>Envío a la hoja de Google</summary>
+        <div class="add">
+          <p class="help" id="sheetState">Sin configurar: las lecturas se guardan solo en este dispositivo.</p>
+          <input id="webUrl" placeholder="Dirección de la web (acaba en /exec)" inputmode="url">
+          <input id="webKey" placeholder="Clave">
+          <button type="button" id="saveSheet">Guardar</button>
+          <p class="help">Se guardan solo en esta tableta, no en la página pública.</p>
+        </div>
+      </details>
     </aside>
 
     <section class="panel card" id="detail">
@@ -173,9 +186,33 @@
   var readings = load("rt_readings", []);       // {horse, t, at (ISO), device}
   var selected = load("rt_selected", horses[0] && horses[0].id);
   var deviceLabel = "";
+  var deviceName = "";
+  var deviceFw = "";
+  var sheet = load("rt_sheet", { url: "", key: "" });
   var device = null;
 
   var $ = function (id) { return document.getElementById(id); };
+
+  function sheetReady() { return /^https:\/\/script\.google\.com\/.+\/exec$/.test(sheet.url) && sheet.key; }
+
+  function renderSheet() {
+    $("webUrl").value = sheet.url; $("webKey").value = sheet.key;
+    $("sheetState").textContent = sheetReady()
+      ? "Activado: cada lectura se envía también a la hoja."
+      : "Sin configurar: las lecturas se guardan solo en este dispositivo.";
+  }
+
+  // Envía la lectura a la web de Apps Script (la misma que usa el NFC).
+  // La respuesta no se puede leer desde otra web, así que se da por enviada.
+  function sendToSheet(r, durS) {
+    if (!sheetReady()) return Promise.resolve(false);
+    var q = new URLSearchParams({
+      k: sheet.key, sn: (deviceName || "TH") + "-BT", seq: String(Date.parse(r.at)),
+      t: r.t.toFixed(2), st: "ok", dur: String(durS || 0), cal: "", fw: deviceFw || "", h: r.horse
+    });
+    return fetch(sheet.url + "?" + q.toString(), { mode: "no-cors", cache: "no-store" })
+      .then(function () { return true; }, function () { return false; });
+  }
   var fmt = function (t) { return t.toFixed(1).replace(".", ","); };
 
   // ---------- Pantalla ----------
@@ -267,6 +304,7 @@
   }
 
   var liveStart = null;
+  var lastDur = 0;
   function onIntermediate(e) {
     var r = parseTemp(e.target.value);
     if (!liveStart) liveStart = Date.now();
@@ -278,6 +316,7 @@
 
   function onMeasurement(e) {
     var r = parseTemp(e.target.value);
+    lastDur = liveStart ? Math.round((Date.now() - liveStart) / 1000) : 0;
     liveStart = null;
     var t = Math.round(r.t * 100) / 100;
     var fever = t >= FEVER;
@@ -285,9 +324,15 @@
     $("val").textContent = fmt(t);
     var h = horses.find(function (x) { return x.id === selected; });
     if (h) {
-      readings.push({ horse: h.id, t: t, at: new Date().toISOString(), device: deviceLabel });
+      var rec = { horse: h.id, t: t, at: new Date().toISOString(), device: deviceLabel };
+      readings.push(rec);
       save("rt_readings", readings);
-      setState(fever ? "fever" : "ok", "Guardada en " + h.name + (r.type === 7 ? " · rectal" : ""));
+      var msg = "Guardada en " + h.name + (r.type === 7 ? " · rectal" : "");
+      setState(fever ? "fever" : "ok", msg + (sheetReady() ? " · enviando a la hoja…" : ""));
+      sendToSheet(rec, lastDur).then(function (ok) {
+        if (!sheetReady()) return;
+        setState(fever ? "fever" : "ok", msg + (ok ? " · enviada a la hoja" : " · no se pudo enviar a la hoja (¿hay internet?)"));
+      });
     } else {
       setState(fever ? "fever" : "ok", "Elige un caballo para guardar las próximas lecturas.");
     }
@@ -328,11 +373,12 @@
         await inter.startNotifications();
         inter.addEventListener("characteristicvaluechanged", onIntermediate);
       } catch (e) { /* el termómetro no envía lecturas en directo */ }
-      deviceLabel = device.name || "Termómetro";
+      deviceName = device.name || "Termometro";
+      deviceLabel = deviceName;
       try {
         var dis = await server.getPrimaryService("device_information");
         var fw = await readString(dis, "firmware_revision_string");
-        if (fw) deviceLabel += " · fw " + fw;
+        if (fw) { deviceFw = fw; deviceLabel += " · fw " + fw; }
       } catch (e) {}
       setConnected(true, deviceLabel);
       setState(null, "Listo. Pulsa el botón del termómetro para medir.");
@@ -360,11 +406,19 @@
     renderAll();
   });
 
+  $("saveSheet").addEventListener("click", function () {
+    sheet = { url: $("webUrl").value.trim(), key: $("webKey").value.trim() };
+    save("rt_sheet", sheet);
+    renderSheet();
+    if (sheet.url && !sheetReady()) $("sheetState").textContent = "Revisa la dirección: tiene que empezar por https://script.google.com/ y acabar en /exec, sin nada detrás.";
+  });
+
   if (!navigator.bluetooth) {
     $("noBt").hidden = false;
     $("connectBtn").disabled = true;
   }
   if (!horses.some(function (h) { return h.id === selected; })) selected = horses[0] && horses[0].id;
+  renderSheet();
   renderAll();
 })();
 </script>
