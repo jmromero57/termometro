@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Registro de temperatura</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+  /* Herramienta de cuadra: lista de caballos a la izquierda (arriba en móvil), ficha y lectura en directo a la derecha */
+  :root {
+    --bg: #f3f4f1;
+    --surface: #ffffff;
+    --fg: #1d2420;
+    --muted: #66706a;
+    --line: #dde1dc;
+    --accent: #2f6b4f;
+    --accent-fg: #ffffff;
+    --fever: #b3392b;
+    --warn: #a86a12;
+    --ok: #2f6b4f;
+    --font: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141816; --surface: #1c221f; --fg: #e6ebe7; --muted: #9aa59e;
+      --line: #2c3430; --accent: #6fbf95; --accent-fg: #0f1512;
+      --fever: #ef7b6c; --warn: #e2a64a; --ok: #6fbf95; color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg); color: var(--fg); font: 15px/1.5 var(--font);
+    padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .wrap {
+    max-width: 980px; margin: 0 auto;
+    padding-block: 20px 40px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+  h1 { font-size: 1.25rem; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  .tag { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; margin-left: 8px; vertical-align: 2px; }
+  .conn { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); display: inline-block; }
+  .dot.on { background: var(--ok); }
+  .status { color: var(--muted); font-size: 0.9rem; }
+  button {
+    font: inherit; font-weight: 500; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--surface); color: var(--fg); padding: 9px 14px; cursor: pointer;
+  }
+  button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .grid { display: grid; grid-template-columns: 280px 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+  .horses { list-style: none; margin: 0; padding: 6px; }
+  .horses li button {
+    width: 100%; text-align: left; border: 0; background: transparent; border-radius: 6px;
+    padding: 10px 12px; display: flex; justify-content: space-between; gap: 8px; align-items: baseline;
+  }
+  .horses li button[aria-pressed="true"] { background: var(--bg); box-shadow: inset 3px 0 0 var(--accent); }
+  .hname { font-weight: 500; min-width: 0; overflow-wrap: anywhere; }
+  .hid { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
+  .hlast { font-family: var(--mono); font-size: 0.85rem; white-space: nowrap; }
+  .hlast.fever { color: var(--fever); }
+  .add { border-top: 1px solid var(--line); padding: 12px; display: grid; gap: 8px; }
+  .add input { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); width: 100%; min-width: 0; }
+  .add .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .card { padding: 20px; display: grid; gap: 18px; min-width: 0; }
+  .eyebrow { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0; }
+  h2 { font-size: 1.5rem; margin: 2px 0 0; text-wrap: balance; }
+  .reading { display: flex; align-items: baseline; gap: 6px; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .reading .val { font-size: clamp(3.2rem, 12vw, 5.5rem); font-weight: 500; line-height: 1; letter-spacing: -0.03em; }
+  .reading .unit { font-size: 1.4rem; color: var(--muted); }
+  .reading.live .val { color: var(--muted); }
+  .reading.final .val { color: var(--ok); }
+  .reading.final.fever .val { color: var(--fever); }
+  .state { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 0.92rem; }
+  .pill { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 8px; border-radius: 999px; border: 1px solid currentColor; }
+  .pill.live { color: var(--warn); }
+  .pill.ok { color: var(--ok); }
+  .pill.fever { color: var(--fever); }
+  .help { color: var(--muted); font-size: 0.9rem; margin: 0; max-width: 60ch; }
+  .tablewrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 500; }
+  td.t { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  td.t.fever { color: var(--fever); font-weight: 600; }
+  .empty { color: var(--muted); font-size: 0.9rem; margin: 0; }
+  .warnbox { border: 1px solid var(--warn); color: var(--fg); background: var(--surface); border-radius: 8px; padding: 12px 14px; font-size: 0.92rem; margin-bottom: 16px; }
+  .device { font-size: 0.85rem; color: var(--muted); font-family: var(--mono); }
+  @media (prefers-reduced-motion: no-preference) { .reading .val { transition: color .3s; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Registro de temperatura <span class="tag">demo</span></h1>
+    <div class="conn">
+      <span class="dot" id="dot"></span>
+      <span class="status" id="status">Termómetro sin conectar</span>
+      <button class="primary" id="connectBtn" type="button">Conectar termómetro</button>
+    </div>
+  </header>
+
+  <div class="warnbox" id="noBt" hidden>
+    Este navegador no permite conectar aparatos Bluetooth. Abre la página en <strong>Chrome</strong> en un móvil o tableta Android, o en Chrome en un ordenador.
+  </div>
+
+  <div class="grid">
+    <aside class="panel">
+      <ul class="horses" id="horses"></ul>
+      <form class="add" id="addForm" autocomplete="off">
+        <p class="eyebrow">Añadir caballo</p>
+        <div class="row">
+          <input id="newId" placeholder="FEI ID" required>
+          <input id="newName" placeholder="Nombre" required>
+        </div>
+        <button type="submit">Añadir</button>
+      </form>
+    </aside>
+
+    <section class="panel card" id="detail">
+      <div>
+        <p class="eyebrow">Caballo seleccionado</p>
+        <h2 id="hTitle">—</h2>
+        <div class="device" id="hSub"></div>
+      </div>
+
+      <div>
+        <div class="reading" id="reading"><span class="val" id="val">--,-</span><span class="unit">°C</span></div>
+        <div class="state" id="state"><span class="help" id="stateText">Conecta el termómetro y pulsa su botón para medir.</span></div>
+      </div>
+
+      <p class="help">La lectura final se guarda en la ficha del caballo que esté seleccionado cuando el termómetro da el pitido largo. Fiebre a partir de 38,5 °C. Las lecturas se guardan solo en este dispositivo.</p>
+
+      <div>
+        <p class="eyebrow">Tomas registradas</p>
+        <div class="tablewrap" id="historyWrap"></div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var FEVER = 38.5;
+  var DEFAULT_HORSES = [
+    { id: "107PF00", name: "UAPITI DE OLID" },
+    { id: "105YJ89", name: "GITALYN" },
+    { id: "108OZ90", name: "CORRANDO" },
+    { id: "106BJ43", name: "HAND SOLO DEL AMOR" },
+    { id: "106MF72", name: "ANKARA BK" }
+  ];
+
+  function load(key, fallback) {
+    try { var v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; }
+  }
+  function save(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {}
+  }
+
+  var horses = load("rt_horses", DEFAULT_HORSES);
+  var readings = load("rt_readings", []);       // {horse, t, at (ISO), device}
+  var selected = load("rt_selected", horses[0] && horses[0].id);
+  var deviceLabel = "";
+  var device = null;
+
+  var $ = function (id) { return document.getElementById(id); };
+  var fmt = function (t) { return t.toFixed(1).replace(".", ","); };
+
+  // ---------- Pantalla ----------
+  function lastFor(id) {
+    for (var i = readings.length - 1; i >= 0; i--) if (readings[i].horse === id) return readings[i];
+    return null;
+  }
+
+  function renderHorses() {
+    var ul = $("horses");
+    ul.textContent = "";
+    horses.forEach(function (h) {
+      var li = document.createElement("li");
+      var b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("aria-pressed", h.id === selected ? "true" : "false");
+      var left = document.createElement("span");
+      var n = document.createElement("span"); n.className = "hname"; n.textContent = h.name;
+      var i = document.createElement("div"); i.className = "hid"; i.textContent = h.id;
+      left.appendChild(n); left.appendChild(i);
+      var last = lastFor(h.id);
+      var r = document.createElement("span");
+      r.className = "hlast" + (last && last.t >= FEVER ? " fever" : "");
+      r.textContent = last ? fmt(last.t) + " °C" : "";
+      b.appendChild(left); b.appendChild(r);
+      b.addEventListener("click", function () { selected = h.id; save("rt_selected", selected); renderAll(); });
+      li.appendChild(b); ul.appendChild(li);
+    });
+  }
+
+  function renderDetail() {
+    var h = horses.find(function (x) { return x.id === selected; });
+    $("hTitle").textContent = h ? h.name : "Elige un caballo";
+    $("hSub").textContent = h ? "FEI ID " + h.id : "";
+    var rows = readings.filter(function (r) { return r.horse === selected; }).slice().reverse();
+    var wrap = $("historyWrap");
+    wrap.textContent = "";
+    if (!rows.length) {
+      var p = document.createElement("p"); p.className = "empty"; p.textContent = "Aún no hay tomas de este caballo.";
+      wrap.appendChild(p); return;
+    }
+    var table = document.createElement("table");
+    table.innerHTML = "<thead><tr><th>Fecha</th><th>Hora</th><th>Toma</th><th>Temperatura</th><th>Termómetro</th></tr></thead>";
+    var tb = document.createElement("tbody");
+    rows.forEach(function (r) {
+      var d = new Date(r.at);
+      var tr = document.createElement("tr");
+      var cells = [
+        d.toLocaleDateString("es-ES"),
+        d.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" }),
+        d.getHours() < 12 ? "Mañana" : "Tarde",
+        fmt(r.t) + " °C" + (r.t >= FEVER ? "  Fiebre" : ""),
+        r.device || ""
+      ];
+      cells.forEach(function (c, idx) {
+        var td = document.createElement("td");
+        td.textContent = c;
+        if (idx === 3) td.className = "t" + (r.t >= FEVER ? " fever" : "");
+        tr.appendChild(td);
+      });
+      tb.appendChild(tr);
+    });
+    table.appendChild(tb); wrap.appendChild(table);
+  }
+
+  function renderAll() { renderHorses(); renderDetail(); }
+
+  function setState(kind, text) {
+    var s = $("state"); s.textContent = "";
+    if (kind) { var p = document.createElement("span"); p.className = "pill " + kind; p.textContent = kind === "live" ? "Midiendo" : kind === "fever" ? "Fiebre" : "Lectura final"; s.appendChild(p); }
+    var t = document.createElement("span"); t.className = "help"; t.textContent = text; s.appendChild(t);
+  }
+
+  // ---------- Bluetooth: perfil Health Thermometer ----------
+  // FLOAT IEEE 11073: 24 bits de mantisa con signo y 8 bits de exponente con signo
+  function parseTemp(dv) {
+    var flags = dv.getUint8(0);
+    var raw = dv.getUint32(1, true);
+    var mant = raw & 0x00ffffff;
+    if (mant & 0x00800000) mant -= 0x01000000;
+    var exp = (raw >> 24) & 0xff;
+    if (exp & 0x80) exp -= 0x100;
+    var value = mant * Math.pow(10, exp);
+    if (flags & 0x01) value = (value - 32) * 5 / 9;   // si viniera en °F
+    var off = 5;
+    if (flags & 0x02) off += 7;                         // marca de tiempo
+    var type = (flags & 0x04) && dv.byteLength > off ? dv.getUint8(off) : null;
+    return { t: value, type: type };
+  }
+
+  var liveStart = null;
+  function onIntermediate(e) {
+    var r = parseTemp(e.target.value);
+    if (!liveStart) liveStart = Date.now();
+    var secs = Math.round((Date.now() - liveStart) / 1000);
+    $("reading").className = "reading live";
+    $("val").textContent = fmt(r.t);
+    setState("live", secs + " s · espera el pitido largo");
+  }
+
+  function onMeasurement(e) {
+    var r = parseTemp(e.target.value);
+    liveStart = null;
+    var t = Math.round(r.t * 100) / 100;
+    var fever = t >= FEVER;
+    $("reading").className = "reading final" + (fever ? " fever" : "");
+    $("val").textContent = fmt(t);
+    var h = horses.find(function (x) { return x.id === selected; });
+    if (h) {
+      readings.push({ horse: h.id, t: t, at: new Date().toISOString(), device: deviceLabel });
+      save("rt_readings", readings);
+      setState(fever ? "fever" : "ok", "Guardada en " + h.name + (r.type === 7 ? " · rectal" : ""));
+    } else {
+      setState(fever ? "fever" : "ok", "Elige un caballo para guardar las próximas lecturas.");
+    }
+    renderAll();
+  }
+
+  function setConnected(on, label) {
+    $("dot").className = "dot" + (on ? " on" : "");
+    $("status").textContent = on ? "Conectado: " + label : "Termómetro sin conectar";
+    $("connectBtn").textContent = on ? "Desconectar" : "Conectar termómetro";
+  }
+
+  async function readString(service, uuid) {
+    try {
+      var c = await service.getCharacteristic(uuid);
+      var v = await c.readValue();
+      return new TextDecoder().decode(v);
+    } catch (e) { return ""; }
+  }
+
+  async function connect() {
+    try {
+      device = await navigator.bluetooth.requestDevice({
+        filters: [{ services: ["health_thermometer"] }],
+        optionalServices: ["device_information"]
+      });
+      device.addEventListener("gattserverdisconnected", function () {
+        setConnected(false); setState(null, "Se ha perdido la conexión. Pulsa Conectar termómetro.");
+      });
+      $("status").textContent = "Conectando…";
+      var server = await device.gatt.connect();
+      var hts = await server.getPrimaryService("health_thermometer");
+      var meas = await hts.getCharacteristic("temperature_measurement");
+      await meas.startNotifications();
+      meas.addEventListener("characteristicvaluechanged", onMeasurement);
+      try {
+        var inter = await hts.getCharacteristic("intermediate_temperature");
+        await inter.startNotifications();
+        inter.addEventListener("characteristicvaluechanged", onIntermediate);
+      } catch (e) { /* el termómetro no envía lecturas en directo */ }
+      deviceLabel = device.name || "Termómetro";
+      try {
+        var dis = await server.getPrimaryService("device_information");
+        var fw = await readString(dis, "firmware_revision_string");
+        if (fw) deviceLabel += " · fw " + fw;
+      } catch (e) {}
+      setConnected(true, deviceLabel);
+      setState(null, "Listo. Pulsa el botón del termómetro para medir.");
+    } catch (e) {
+      setConnected(false);
+      if (e && e.name === "NotFoundError") setState(null, "No se ha elegido ningún termómetro.");
+      else setState(null, "No se pudo conectar: " + (e && e.message ? e.message : e) + ". Comprueba que el termómetro está encendido y el Bluetooth activado.");
+    }
+  }
+
+  $("connectBtn").addEventListener("click", function () {
+    if (device && device.gatt && device.gatt.connected) { device.gatt.disconnect(); return; }
+    connect();
+  });
+
+  $("addForm").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var id = $("newId").value.trim().toUpperCase();
+    var name = $("newName").value.trim().toUpperCase();
+    if (!id || !name) return;
+    if (!horses.some(function (h) { return h.id === id; })) horses.push({ id: id, name: name });
+    save("rt_horses", horses);
+    selected = id; save("rt_selected", selected);
+    $("newId").value = ""; $("newName").value = "";
+    renderAll();
+  });
+
+  if (!navigator.bluetooth) {
+    $("noBt").hidden = false;
+    $("connectBtn").disabled = true;
+  }
+  if (!horses.some(function (h) { return h.id === selected; })) selected = horses[0] && horses[0].id;
+  renderAll();
+})();
+</script>
+</body>
+</html>
